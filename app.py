@@ -995,42 +995,94 @@ with tabs[6]:
                     shap_lib   = st.session_state["shap_lib"]
                     explainer  = st.session_state["shap_explainer"]
 
+                    # helper: wrap long feature names for y-axis labels
+                    def wrap_feat_names(names, width=35):
+                        return ["\n".join(textwrap.wrap(n, width)) for n in names]
+
+                    # helper: rename X_fi columns to short codes for SHAP plots, return mapping
+                    def make_short_X(X):
+                        short_names = {c: f"F{i:02d}" for i, c in enumerate(X.columns)}
+                        return X.rename(columns=short_names), short_names
+
+                    X_fi_short, short_map = make_short_X(X_fi)
+                    reverse_map = {v: k for k, v in short_map.items()}
+                    shap_vals_arr = np.array(shap_vals)  # ensure plain ndarray
+
                     with shap_subtabs[0]:
                         st.markdown("**Beeswarm Plot（特徵對預測的影響分布）**")
-                        fig_bee, ax_bee = plt.subplots(figsize=(10, max(6, top_n_fi * 0.4)))
-                        shap_lib.summary_plot(shap_vals, X_fi, max_display=top_n_fi,
+                        fig_height = max(6, top_n_fi * 0.55)
+                        plt.figure(figsize=(11, fig_height))
+                        shap_lib.summary_plot(shap_vals_arr, X_fi_short,
+                                              max_display=top_n_fi,
                                               plot_type="dot", show=False)
+                        # replace short codes with wrapped original names on y-axis
+                        ax_bee = plt.gca()
+                        ax_bee.set_yticklabels(
+                            ["\n".join(textwrap.wrap(reverse_map.get(t.get_text(), t.get_text()), 40))
+                             for t in ax_bee.get_yticklabels()], fontsize=8
+                        )
+                        plt.subplots_adjust(left=0.38)
                         st.pyplot(plt.gcf()); plt.close()
 
                     with shap_subtabs[1]:
                         st.markdown("**Global Bar Plot（平均絕對 SHAP）**")
-                        fig_bar_shap, _ = plt.subplots(figsize=(10, max(5, top_n_fi * 0.4)))
-                        shap_lib.summary_plot(shap_vals, X_fi, max_display=top_n_fi,
+                        fig_height = max(5, top_n_fi * 0.55)
+                        plt.figure(figsize=(11, fig_height))
+                        shap_lib.summary_plot(shap_vals_arr, X_fi_short,
+                                              max_display=top_n_fi,
                                               plot_type="bar", show=False)
+                        ax_bar_s = plt.gca()
+                        ax_bar_s.set_yticklabels(
+                            ["\n".join(textwrap.wrap(reverse_map.get(t.get_text(), t.get_text()), 40))
+                             for t in ax_bar_s.get_yticklabels()], fontsize=8
+                        )
+                        plt.subplots_adjust(left=0.38)
                         st.pyplot(plt.gcf()); plt.close()
 
                     with shap_subtabs[2]:
                         st.markdown("**Waterfall Plot（單一樣本預測解釋）**")
                         sample_idx_shap = st.slider("選擇樣本編號", 0, len(X_fi)-1, 0, key="shap_sample")
+
+                        # Fix: ensure base_values is a plain Python float (scalar)
+                        ev_raw = explainer.expected_value
+                        if hasattr(ev_raw, "__len__"):
+                            base_val_scalar = float(ev_raw[0])
+                        else:
+                            base_val_scalar = float(ev_raw)
+
                         expl_obj = shap_lib.Explanation(
-                            values=shap_vals[sample_idx_shap],
-                            base_values=explainer.expected_value,
+                            values=shap_vals_arr[sample_idx_shap],
+                            base_values=base_val_scalar,          # ← must be scalar float
                             data=X_fi.iloc[sample_idx_shap].values,
-                            feature_names=X_fi.columns.tolist()
+                            feature_names=X_fi_short.columns.tolist()  # short codes first
                         )
-                        fig_wf, _ = plt.subplots(figsize=(10, max(5, top_n_fi * 0.4)))
+                        fig_wf_h = max(6, top_n_fi * 0.55)
+                        plt.figure(figsize=(12, fig_wf_h))
                         shap_lib.plots.waterfall(expl_obj, max_display=top_n_fi, show=False)
+                        # replace short codes → wrapped original names
+                        ax_wf = plt.gca()
+                        ax_wf.set_yticklabels(
+                            ["\n".join(textwrap.wrap(reverse_map.get(t.get_text(), t.get_text()), 40))
+                             for t in ax_wf.get_yticklabels()], fontsize=8
+                        )
+                        plt.subplots_adjust(left=0.38)
                         st.pyplot(plt.gcf()); plt.close()
+
+                        # show sample info
+                        st.caption(f"樣本 {sample_idx_shap}｜預測值：{rf.predict(X_fi.iloc[[sample_idx_shap]])[0]:.3f}｜"
+                                   f"實際值：{y_fi.iloc[sample_idx_shap]:.3f}｜基準值：{base_val_scalar:.3f}")
 
                     with shap_subtabs[3]:
                         st.markdown("**Dependence Plot（特定特徵的 SHAP 與交互效應）**")
-                        dep_feat = st.selectbox("主特徵", X_fi.columns.tolist(), key="shap_dep_feat")
-                        dep_interact = st.selectbox("交互著色特徵（auto = 自動偵測）",
+                        dep_feat_orig    = st.selectbox("主特徵", X_fi.columns.tolist(), key="shap_dep_feat")
+                        dep_interact_orig= st.selectbox("交互著色特徵（auto = 自動偵測）",
                                                     ["auto"] + X_fi.columns.tolist(), key="shap_dep_interact")
-                        interact_val = None if dep_interact == "auto" else dep_interact
+                        dep_feat_short    = short_map[dep_feat_orig]
+                        interact_short    = None if dep_interact_orig == "auto" else short_map[dep_interact_orig]
                         fig_dep, ax_dep = plt.subplots(figsize=(9, 5))
-                        shap_lib.dependence_plot(dep_feat, shap_vals, X_fi,
-                                                 interaction_index=interact_val, ax=ax_dep, show=False)
+                        shap_lib.dependence_plot(dep_feat_short, shap_vals_arr, X_fi_short,
+                                                 interaction_index=interact_short, ax=ax_dep, show=False)
+                        ax_dep.set_xlabel(dep_feat_orig, fontsize=9)
                         plt.tight_layout()
                         st.pyplot(fig_dep); plt.close()
 
@@ -1085,17 +1137,22 @@ with tabs[6]:
                             y_arr = np.array(y_fi).ravel()
                             pls_model.fit(X_arr, y_arr)
 
-                            # VIP calculation
-                            t  = pls_model.x_scores_
-                            w  = pls_model.x_weights_
-                            q  = pls_model.y_loadings_
+                            # VIP calculation (robust version)
+                            t  = pls_model.x_scores_      # (n, h)
+                            w  = pls_model.x_weights_     # (p, h)
+                            q  = pls_model.y_loadings_    # (1, h) or (h,)
                             p_feat, h = w.shape
+                            # s[j] = variance explained by component j weighted by y-loading
+                            s = np.array([
+                                float(np.dot(t[:, j], t[:, j]) * float(np.atleast_1d(q.ravel()[j])**2))
+                                for j in range(h)
+                            ])
+                            total_s = float(np.sum(s))
                             vips = np.zeros(p_feat)
-                            s = np.diag(t.T @ t @ q.T @ q).reshape(h, -1)
-                            total_s = np.sum(s)
                             for ii in range(p_feat):
-                                weight = np.array([(w[ii, j] / np.linalg.norm(w[:, j]))**2 for j in range(h)])
-                                vips[ii] = np.sqrt(p_feat * (s.T @ weight) / total_s)
+                                # normalised weight for feature ii across components
+                                w_norm = np.array([(w[ii, j] / np.linalg.norm(w[:, j]))**2 for j in range(h)])
+                                vips[ii] = float(np.sqrt(p_feat * float(np.dot(s, w_norm)) / total_s))
 
                             vip_df_pls = pd.DataFrame({
                                 "Feature": X_fi.columns,
