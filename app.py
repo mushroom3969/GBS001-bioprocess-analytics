@@ -447,14 +447,14 @@ with tabs[0]:
 
     st.markdown("#### 製程步驟欄位統計")
     step_df = process_step_count(raw_df)
-    st.dataframe(step_df, use_container_width=True, hide_index=True)
+    st.dataframe(step_df, width="stretch", hide_index=True)
 
     st.markdown("#### 原始資料預覽")
-    st.dataframe(raw_df.head(10), use_container_width=True)
+    st.dataframe(raw_df.head(10), width="stretch")
 
     if selected_process_df is not None:
         st.markdown(f"#### 已選製程：`{selected_process}` — 欄位預覽")
-        st.dataframe(selected_process_df.head(10), use_container_width=True)
+        st.dataframe(selected_process_df.head(10), width="stretch")
 
 # ─────────────────────────────────────────────────────────
 # TAB 1: 趨勢圖
@@ -520,10 +520,10 @@ with tabs[2]:
                 col1, col2 = st.columns(2)
                 with col1:
                     st.markdown("#### 清理後資料預覽")
-                    st.dataframe(clean_df.head(10), use_container_width=True)
+                    st.dataframe(clean_df.head(10), width="stretch")
                 with col2:
                     st.markdown("#### 刪除/合併記錄")
-                    st.dataframe(drop_log, use_container_width=True, hide_index=True)
+                    st.dataframe(drop_log, width="stretch", hide_index=True)
 
         if st.session_state["clean_df"] is not None:
             clean_df = st.session_state["clean_df"]
@@ -552,14 +552,15 @@ with tabs[2]:
                             [(k, v) for k, v in dropped_info.items()],
                             columns=["Column", "Reason"]
                         )
-                        st.dataframe(drop_df, use_container_width=True, hide_index=True)
+                        st.dataframe(drop_df, width="stretch", hide_index=True)
 
 # ─────────────────────────────────────────────────────────
 # TAB 3: 缺失值分析
 # ─────────────────────────────────────────────────────────
 with tabs[3]:
     st.header("缺失值分析")
-    work_df = st.session_state.get("clean_df") or selected_process_df
+    _cd = st.session_state.get("clean_df")
+    work_df = _cd if _cd is not None else selected_process_df
     if work_df is None:
         st.info("請先在側欄選擇製程步驟，或執行特徵工程。")
     else:
@@ -569,7 +570,7 @@ with tabs[3]:
         else:
             st.metric("含缺失值的欄位數", len(summary_df))
             st.dataframe(summary_df.style.background_gradient(cmap="Reds", subset=["Missing Ratio (%)"]),
-                         use_container_width=True)
+                         width="stretch")
 
             # Missing heatmap
             st.markdown("#### 缺失值熱圖")
@@ -599,14 +600,15 @@ with tabs[3]:
                     filtered = filtered.drop(columns=cols_to_drop)
                 st.session_state["clean_df"] = filtered
                 st.success(f"✅ 移除後：{filtered.shape[0]} 筆 × {filtered.shape[1]} 欄")
-                st.dataframe(filtered.head(), use_container_width=True)
+                st.dataframe(filtered.head(), width="stretch")
 
 # ─────────────────────────────────────────────────────────
 # TAB 4: 相關性分析
 # ─────────────────────────────────────────────────────────
 with tabs[4]:
     st.header("相關性分析")
-    work_df = st.session_state.get("clean_df") or selected_process_df
+    _cd = st.session_state.get("clean_df")
+    work_df = _cd if _cd is not None else selected_process_df
     if work_df is None:
         st.info("請先在側欄選擇製程步驟。")
     else:
@@ -630,7 +632,7 @@ with tabs[4]:
                         st.dataframe(
                             corr_rank.style.background_gradient(
                                 cmap="RdBu_r", subset=["Correlation"], vmin=-1, vmax=1),
-                            use_container_width=True, hide_index=True
+                            width="stretch", hide_index=True
                         )
                         # Store for other tabs
                         st.session_state["target_col"] = target_col
@@ -641,7 +643,8 @@ with tabs[4]:
 # ─────────────────────────────────────────────────────────
 with tabs[5]:
     st.header("PCA 主成分分析")
-    work_df = st.session_state.get("clean_df") or selected_process_df
+    _cd = st.session_state.get("clean_df")
+    work_df = _cd if _cd is not None else selected_process_df
     if work_df is None:
         st.info("請先在側欄選擇製程步驟。")
     else:
@@ -703,7 +706,7 @@ with tabs[5]:
                             return str(x)
                     topfeat = topfeat.copy()
                     topfeat["feature_name"] = topfeat["feature"].apply(safe_map)
-                    st.dataframe(topfeat, use_container_width=True, hide_index=True)
+                    st.dataframe(topfeat, width="stretch", hide_index=True)
 
             except Exception as e:
                 st.error(f"PCA 執行失敗：{e}")
@@ -713,7 +716,8 @@ with tabs[5]:
 # ─────────────────────────────────────────────────────────
 with tabs[6]:
     st.header("特徵重要性分析")
-    work_df = st.session_state.get("clean_df") or selected_process_df
+    _cd = st.session_state.get("clean_df")
+    work_df = _cd if _cd is not None else selected_process_df
     if work_df is None:
         st.info("請先在側欄選擇製程步驟。")
     else:
@@ -764,7 +768,7 @@ with tabs[6]:
                 st.markdown("#### 重要性排行表")
                 st.dataframe(importance_df.reset_index(drop=True).style.background_gradient(
                     cmap="Blues", subset=[importance_col]),
-                    use_container_width=True, hide_index=True
+                    width="stretch", hide_index=True
                 )
 
                 # PLS cross-validation curve
