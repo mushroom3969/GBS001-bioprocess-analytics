@@ -1137,22 +1137,22 @@ with tabs[6]:
                             y_arr = np.array(y_fi).ravel()
                             pls_model.fit(X_arr, y_arr)
 
-                            # VIP calculation (robust version)
-                            t  = pls_model.x_scores_      # (n, h)
-                            w  = pls_model.x_weights_     # (p, h)
-                            q  = pls_model.y_loadings_    # (1, h) or (h,)
+                            # VIP calculation — fully scalar, sklearn-version safe
+                            t = np.array(pls_model.x_scores_,  dtype=float)   # (n, h)
+                            w = np.array(pls_model.x_weights_,  dtype=float)   # (p, h)
+                            q = np.array(pls_model.y_loadings_, dtype=float).ravel()  # (h,)
                             p_feat, h = w.shape
-                            # s[j] = variance explained by component j weighted by y-loading
+                            # s[j]: scalar variance of component j weighted by y-loading²
                             s = np.array([
-                                float(np.dot(t[:, j], t[:, j]) * float(np.atleast_1d(q.ravel()[j])**2))
+                                float(t[:, j] @ t[:, j]) * float(q[j]) ** 2
                                 for j in range(h)
-                            ])
-                            total_s = float(np.sum(s))
-                            vips = np.zeros(p_feat)
-                            for ii in range(p_feat):
-                                # normalised weight for feature ii across components
-                                w_norm = np.array([(w[ii, j] / np.linalg.norm(w[:, j]))**2 for j in range(h)])
-                                vips[ii] = float(np.sqrt(p_feat * float(np.dot(s, w_norm)) / total_s))
+                            ], dtype=float)
+                            total_s = float(s.sum())
+                            # w_norm[j, i]: normalised weight of feature i for component j
+                            w_col_norms = np.linalg.norm(w, axis=0)          # (h,)
+                            w_normed = (w / w_col_norms) ** 2                 # (p, h)
+                            # vip[i] = sqrt( p * sum_j(s[j] * w_normed[i,j]) / total_s )
+                            vips = np.sqrt(p_feat * (w_normed @ s) / total_s)  # (p,)
 
                             vip_df_pls = pd.DataFrame({
                                 "Feature": X_fi.columns,
