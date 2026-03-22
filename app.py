@@ -1341,7 +1341,7 @@ Focus on mechanistic understanding that would help a bioprocess engineer interpr
                     # Gemini REST API
                     _gemini_url = (
                         f"https://generativelanguage.googleapis.com/v1beta/models/"
-                        f"gemini-1.5-flash:generateContent?key={_api_key}"
+                        f"gemini-2.0-flash:generateContent?key={_api_key}"
                     )
                     # Merge system + user into single user turn (Gemini style)
                     _combined = f"{system_prompt}\n\n---\n\n{user_prompt}"
@@ -1435,7 +1435,7 @@ Focus on mechanistic understanding that would help a bioprocess engineer interpr
 
                         _gemini_url2 = (
                             f"https://generativelanguage.googleapis.com/v1beta/models/"
-                            f"gemini-1.5-flash:generateContent?key={_api_key}"
+                            f"gemini-2.0-flash:generateContent?key={_api_key}"
                         )
                         # Build multi-turn conversation for Gemini
                         _combined_init = f"{system_prompt}\n\n---\n\n{user_prompt}"
