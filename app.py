@@ -1246,17 +1246,47 @@ with tabs[7]:
             })
         return articles
 
-    def build_search_queries(features, target, context):
-        proc_kw = context.split(",")[0].strip() if context else "bioprocess"
-        queries = []
+    def build_search_queries_with_gemini(features, target, context, api_key):
+        feat_list = chr(10).join(['- ' + f for f in features])
+        prompt = (
+            'You are a bioprocess scientist. Convert each process parameter name '
+            'into a concise PubMed search query (3-6 words) using standard scientific terminology. '
+            'Process context: ' + context + ' Target: ' + target + ' '
+            'Parameters: ' + feat_list + ' '
+            'Also add 2 broad topic queries. '
+            'Reply ONLY with a JSON array like: [{"param":"X","query":"HIC protein yield"}] '
+            'No markdown, no explanation.'
+        )
+        try:
+            url = ('https://generativelanguage.googleapis.com/v1beta/models/'
+                   'gemini-2.5-flash:generateContent?key=' + api_key)
+            payload = _ujson2.dumps({
+                'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
+                'generationConfig': {'maxOutputTokens': 1000, 'temperature': 0.1},
+            }).encode('utf-8')
+            req = _ureq2.Request(url, data=payload,
+                                 headers={'Content-Type': 'application/json'}, method='POST')
+            with _ureq2.urlopen(req, timeout=30) as resp:
+                result = _ujson2.loads(resp.read())
+            raw = result['candidates'][0]['content']['parts'][0]['text'].strip()
+            raw = _re2.sub(r'^```[\w]*\n?|```$', '', raw).strip()
+            parsed = _ujson2.loads(raw)
+            qs = [(item['param'], item['query']) for item in parsed
+                  if 'param' in item and 'query' in item]
+            if qs:
+                return qs
+        except Exception:
+            pass
+        proc_kw = context.split(',')[0].strip() if context else 'bioprocess'
+        qs = []
         for feat in features:
-            clean = _re2.sub(r"\(.*?\)", "", feat).replace("_", " ").replace("-", " ")
+            clean = _re2.sub(r'\(.*?\)', '', feat).replace('_', ' ').replace('-', ' ')
             words = [w for w in clean.split() if len(w) > 3]
-            kw = " ".join(words[:4])
+            kw = ' '.join(words[:4])
             if kw:
-                queries.append((feat, kw + " " + proc_kw + " chromatography yield"))
-        queries.append(("Overall", proc_kw + " yield optimization process parameters"))
-        return queries
+                qs.append((feat, kw + ' ' + proc_kw + ' chromatography yield'))
+        qs.append(('Overall', proc_kw + ' yield optimization process parameters'))
+        return qs
 
     def call_gemini_lit(api_key, prompt, max_tokens=6000):
         url = ("https://generativelanguage.googleapis.com/v1beta/models/"
@@ -1311,7 +1341,13 @@ with tabs[7]:
         st.warning("請填入目標變數與重要參數。")
     else:
         if st.button("🔎 搜尋 PubMed 論文", key="run_pubmed"):
-            queries = build_search_queries(important_features, target_var_lit, process_context)
+            _api_key_qs = st.secrets.get("GEMINI_API_KEY", _os2.environ.get("GEMINI_API_KEY", ""))
+            with st.spinner("🤖 Gemini 正在將參數名稱轉換為 PubMed 搜尋關鍵字..."):
+                queries = build_search_queries_with_gemini(
+                    important_features, target_var_lit, process_context, _api_key_qs)
+            st.markdown("**生成的搜尋關鍵字：**")
+            for feat, q in queries:
+                st.caption("· `" + feat[:50] + "` → **" + q + "**")
             all_articles = {}
             prog = st.progress(0, text="搜尋中...")
             for i, (feat, query) in enumerate(queries):
