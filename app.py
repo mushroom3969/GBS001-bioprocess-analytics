@@ -1181,282 +1181,301 @@ with tabs[6]:
 
 
 # ─────────────────────────────────────────────────────────
-# TAB 7: 文獻佐證分析
+# TAB 7: 文獻佐證分析（PubMed + Gemini）
 # ─────────────────────────────────────────────────────────
 with tabs[7]:
     st.header("📚 文獻佐證分析")
     st.markdown("""
     <div class="info-box">
-    根據你的分析結果（重要參數 + 目標變數），使用 AI 搜尋相關科學文獻，
-    解釋這些製程參數為何對目標產量/品質有影響，並提供可追蹤的文獻方向。
+    自動從 <b>PubMed</b> 搜尋真實論文 → 抓取摘要 → Gemini 基於真實文獻整理分析。
+    所有引用都附 PMID 連結，可直接追蹤原始論文。
     </div>
     """, unsafe_allow_html=True)
 
-    # ── 參數輸入區 ──────────────────────────────────────────
-    st.markdown("### Step 1：設定分析參數")
+    import urllib.parse as _uparse
+    import urllib.request as _ureq2
+    import json as _ujson2
+    import time as _time2
+    import re as _re2
+    import os as _os2
 
-    col_a, col_b = st.columns(2)
-    with col_a:
+    def pubmed_search(query, max_results=5):
+        base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+        url = base + "esearch.fcgi?db=pubmed&retmode=json&retmax=" + str(max_results) + "&term=" + _uparse.quote(query)
+        try:
+            with _ureq2.urlopen(url, timeout=10) as r:
+                data = _ujson2.loads(r.read())
+            return data["esearchresult"].get("idlist", [])
+        except Exception:
+            return []
+
+    def pubmed_fetch_abstracts(pmids):
+        if not pmids:
+            return []
+        base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+        fetch_url = base + "efetch.fcgi?db=pubmed&id=" + ",".join(pmids) + "&rettype=abstract&retmode=xml"
+        try:
+            with _ureq2.urlopen(fetch_url, timeout=15) as r:
+                xml = r.read().decode("utf-8")
+        except Exception:
+            return []
+
+        articles = []
+        blocks = _re2.findall(r"<PubmedArticle>(.*?)</PubmedArticle>", xml, _re2.DOTALL)
+        for block in blocks:
+            pmid_m    = _re2.search(r"<PMID[^>]*>(\d+)</PMID>", block)
+            title_m   = _re2.search(r"<ArticleTitle>(.*?)</ArticleTitle>", block, _re2.DOTALL)
+            abs_m     = _re2.search(r"<AbstractText[^>]*>(.*?)</AbstractText>", block, _re2.DOTALL)
+            year_m    = _re2.search(r"<PubDate>.*?<Year>(\d{4})</Year>", block, _re2.DOTALL)
+            journal_m = _re2.search(r"<ISOAbbreviation>(.*?)</ISOAbbreviation>", block)
+
+            def clean_xml(s):
+                return _re2.sub(r"<[^>]+>", "", s).strip() if s else ""
+
+            pmid    = pmid_m.group(1)    if pmid_m    else "?"
+            title   = clean_xml(title_m.group(1))   if title_m   else "No title"
+            abstract= clean_xml(abs_m.group(1))      if abs_m     else "No abstract"
+            year    = year_m.group(1)    if year_m    else "?"
+            journal = clean_xml(journal_m.group(1))  if journal_m else "?"
+
+            articles.append({
+                "pmid": pmid, "title": title,
+                "abstract": abstract[:800],
+                "year": year, "journal": journal,
+                "url": "https://pubmed.ncbi.nlm.nih.gov/" + pmid + "/"
+            })
+        return articles
+
+    def build_search_queries(features, target, context):
+        proc_kw = context.split(",")[0].strip() if context else "bioprocess"
+        queries = []
+        for feat in features:
+            clean = _re2.sub(r"\(.*?\)", "", feat).replace("_", " ").replace("-", " ")
+            words = [w for w in clean.split() if len(w) > 3]
+            kw = " ".join(words[:4])
+            if kw:
+                queries.append((feat, kw + " " + proc_kw + " chromatography yield"))
+        queries.append(("Overall", proc_kw + " yield optimization process parameters"))
+        return queries
+
+    def call_gemini_lit(api_key, prompt, max_tokens=6000):
+        url = ("https://generativelanguage.googleapis.com/v1beta/models/"
+               "gemini-2.5-flash:generateContent?key=" + api_key)
+        payload = _ujson2.dumps({
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.2},
+        }).encode("utf-8")
+        req = _ureq2.Request(url, data=payload,
+                             headers={"Content-Type": "application/json"}, method="POST")
+        with _ureq2.urlopen(req, timeout=60) as resp:
+            result = _ujson2.loads(resp.read())
+        return result["candidates"][0]["content"]["parts"][0]["text"]
+
+    # ── Step 1：參數設定 ──────────────────────────────────────
+    st.markdown("### Step 1：設定分析參數")
+    col_la, col_lb = st.columns(2)
+    with col_la:
         target_var_lit = st.text_input(
             "🎯 目標變數（Y）",
             value=st.session_state.get("target_col", ""),
             placeholder="例：phenyl chromatography_Yield Rate (%)",
-            help="你想要解釋的輸出變數"
         )
         process_context = st.text_input(
-            "🧪 製程背景（Product / Process）",
+            "🧪 製程背景",
             value="rhG-CSF protein purification, Phenyl Hydrophobic Interaction Chromatography",
-            help="讓 AI 了解製程背景，產出更精準的文獻分析"
         )
+        max_papers_per_feat = st.slider("每個參數搜尋論文數", 1, 5, 3, key="lit_max_papers")
 
-    with col_b:
-        # 自動帶入重要性分析結果
+    with col_lb:
         auto_features = []
         if st.session_state.get("fi_perm_df") is not None:
-            auto_features = st.session_state["fi_perm_df"]["Feature"].head(10).tolist()
+            auto_features = st.session_state["fi_perm_df"]["Feature"].head(8).tolist()
         if st.session_state.get("pls_vip_df") is not None:
             vip_top = st.session_state["pls_vip_df"][
-                st.session_state["pls_vip_df"]["VIP"] >= 1.0
-            ]["Feature"].head(10).tolist()
+                st.session_state["pls_vip_df"]["VIP"] >= 1.0]["Feature"].head(8).tolist()
             auto_features = list(dict.fromkeys(auto_features + vip_top))
 
-        default_feat_text = "\n".join(auto_features[:8]) if auto_features else ""
         important_features_text = st.text_area(
-            "📌 重要參數（每行一個，自動帶入分析結果）",
-            value=default_feat_text,
-            height=180,
-            help="從特徵重要性 / PLS-VIP 分析中選出的關鍵參數"
+            "📌 重要參數（每行一個）",
+            value="\n".join(auto_features[:6]) if auto_features else "",
+            height=200,
         )
+        lang_lit = st.radio("輸出語言", ["繁體中文", "English"], horizontal=True, key="lit_lang")
 
     important_features = [f.strip() for f in important_features_text.strip().split("\n") if f.strip()]
 
-    # ── 分析模式選擇 ─────────────────────────────────────────
-    st.markdown("### Step 2：選擇分析深度")
-    analysis_mode = st.radio(
-        "分析模式",
-        [
-            "📋 快速摘要（每個參數 2-3 句文獻支持）",
-            "📖 深度分析（機制解釋 + 文獻方向 + 實驗建議）",
-            "🔬 逐一深挖（每個參數獨立詳細分析）",
-        ],
-        horizontal=False,
-        key="lit_mode"
-    )
+    # ── Step 2：PubMed 搜尋 ───────────────────────────────────
+    st.markdown("### Step 2：搜尋 PubMed 文獻")
 
-    lang = st.radio("輸出語言", ["繁體中文", "English"], horizontal=True, key="lit_lang")
-
-    # ── 執行分析 ─────────────────────────────────────────────
-    st.markdown("### Step 3：執行 AI 文獻分析")
-
-    if not important_features:
-        st.warning("請先填入重要參數，或先執行特徵重要性分析（Tab 7）讓系統自動帶入。")
-    elif not target_var_lit.strip():
-        st.warning("請填入目標變數。")
+    if not important_features or not target_var_lit.strip():
+        st.warning("請填入目標變數與重要參數。")
     else:
-        st.markdown("**將分析以下參數與目標的文獻關係：**")
-        feat_cols = st.columns(min(4, len(important_features)))
-        for i, feat in enumerate(important_features):
-            feat_cols[i % len(feat_cols)].markdown(f"- `{feat}`")
+        if st.button("🔎 搜尋 PubMed 論文", key="run_pubmed"):
+            queries = build_search_queries(important_features, target_var_lit, process_context)
+            all_articles = {}
+            prog = st.progress(0, text="搜尋中...")
+            for i, (feat, query) in enumerate(queries):
+                pmids = pubmed_search(query, max_results=max_papers_per_feat)
+                if pmids:
+                    arts = pubmed_fetch_abstracts(pmids)
+                    all_articles[feat] = {"query": query, "articles": arts}
+                _time2.sleep(0.35)
+                prog.progress((i + 1) / len(queries), text="搜尋中：" + feat[:40] + "...")
+            prog.empty()
+            st.session_state["pubmed_results"] = all_articles
+            total = sum(len(v["articles"]) for v in all_articles.values())
+            st.success("✅ 共找到 " + str(total) + " 篇論文！")
 
-        if st.button("🔍 開始 AI 文獻分析", type="primary", key="run_lit"):
+        if st.session_state.get("pubmed_results"):
+            all_articles = st.session_state["pubmed_results"]
+            st.markdown("#### 📄 找到的論文")
+            for feat, data in all_articles.items():
+                with st.expander("**" + feat + "** — " + str(len(data["articles"])) + " 篇 | 搜尋：`" + data["query"] + "`"):
+                    for art in data["articles"]:
+                        st.markdown(
+                            "**[" + art["title"] + "](" + art["url"] + ")**  \n"
+                            "_" + art["journal"] + "_ (" + art["year"] + ") · PMID: `" + art["pmid"] + "`  \n"
+                            + art["abstract"] + "..."
+                        )
+                        st.markdown("---")
 
-            # ── 組裝 Prompt ──────────────────────────────────
-            feat_list_str = "\n".join([f"  {i+1}. {f}" for i, f in enumerate(important_features)])
+            # ── Step 3：Gemini 分析 ──────────────────────────────
+            st.markdown("### Step 3：AI 基於真實文獻分析")
 
-            if "快速摘要" in analysis_mode:
-                depth_instruction = """
-For each parameter, provide:
-- 1-2 sentences explaining the known mechanistic relationship with the target variable
-- Key reference direction (journal name or research area, not fabricated citations)
-- Confidence level: [Well-established / Likely / Hypothetical]
-Keep each parameter section concise (3-5 sentences total).
-"""
-            elif "深度分析" in analysis_mode:
-                depth_instruction = """
-Provide a comprehensive analysis covering:
-1. **Overall Narrative**: How do these parameters collectively influence the target?
-2. **For each parameter**:
-   - Mechanistic explanation (physicochemical or biological basis)
-   - Known literature direction (which journals/research areas cover this)
-   - Interaction effects with other listed parameters if known
-   - Confidence level: [Well-established / Likely / Hypothetical]
-3. **Research Gaps**: What is NOT well understood and worth investigating?
-4. **Experimental Suggestions**: Based on literature, what follow-up experiments would validate these findings?
-"""
-            else:  # 逐一深挖
-                depth_instruction = """
-For EACH parameter, write a standalone deep-dive section:
-- Full mechanistic explanation with physicochemical basis
-- How it specifically affects the target variable (direction + magnitude if known)
-- Key research areas and journals that have studied this
-- Whether the effect is linear, non-linear, or context-dependent
-- Interaction with other process parameters
-- Practical implications for process control
-- Confidence: [Well-established / Likely / Hypothetical]
-"""
+            if st.button("🧠 開始 AI 文獻分析", type="primary", key="run_lit_gemini"):
+                _api_key_lit = st.secrets.get("GEMINI_API_KEY", _os2.environ.get("GEMINI_API_KEY", ""))
+                if not _api_key_lit:
+                    st.error("找不到 GEMINI_API_KEY，請在 Streamlit Secrets 設定。")
+                    st.stop()
 
-            lang_instruction = "Respond in Traditional Chinese (繁體中文)." if lang == "繁體中文" else "Respond in English."
+                lit_context = ""
+                ref_list = []
+                ref_idx = 1
+                for feat, data in all_articles.items():
+                    lit_context += "\n\n=== Parameter: " + feat + " ===\n"
+                    for art in data["articles"]:
+                        lit_context += (
+                            "[" + str(ref_idx) + "] " + art["title"] + " ("
+                            + art["journal"] + ", " + art["year"] + ", PMID:" + art["pmid"] + ")\n"
+                            "Abstract: " + art["abstract"] + "\n\n"
+                        )
+                        ref_list.append(
+                            "[" + str(ref_idx) + "] " + art["title"] + ". "
+                            + art["journal"] + " (" + art["year"] + "). "
+                            + "PMID: " + art["pmid"] + ". " + art["url"]
+                        )
+                        ref_idx += 1
 
-            system_prompt = f"""You are an expert bioprocess scientist specializing in protein purification, 
-chromatography, and downstream processing. You have deep knowledge of scientific literature in:
-- Biopharmaceutical manufacturing
-- Protein refolding and purification
-- Chromatography (HIC, IEX, affinity)
-- Statistical process control in biopharma
+                lang_inst = "Respond in Traditional Chinese (繁體中文)." if lang_lit == "繁體中文" else "Respond in English."
+                feat_list = "\n".join(["  " + str(i+1) + ". " + f for i, f in enumerate(important_features)])
 
-IMPORTANT RULES:
-1. Only cite real, plausible research directions — do NOT fabricate specific paper titles, authors, or DOIs
-2. You MAY mention real journals (e.g., Journal of Chromatography A, Biotechnology & Bioengineering, etc.)
-3. You MAY mention well-known mechanistic principles that are established in the field
-4. Always indicate your confidence level for each claim
-5. Be honest when a relationship is hypothetical or context-dependent
-6. {lang_instruction}"""
+                prompt = (
+                    "You are an expert bioprocess scientist. Analyze the following real PubMed literature "
+                    "to explain why the listed process parameters are important predictors of the target variable.\n\n"
+                    "Process Context: " + process_context + "\n"
+                    "Target Variable: " + target_var_lit + "\n\n"
+                    "Important Parameters:\n" + feat_list + "\n\n"
+                    "=== REAL PUBMED LITERATURE ===\n" + lit_context + "\n\n"
+                    "STRICT RULES:\n"
+                    "1. ONLY cite papers from the list above using [number]\n"
+                    "2. Do NOT invent papers\n"
+                    "3. If evidence is weak or absent, say so\n"
+                    "4. End with a Reference List with PMID and URL\n"
+                    "5. " + lang_inst + "\n\n"
+                    "Output:\n"
+                    "## 總覽\n(collective effect on target)\n\n"
+                    "## 各參數分析\n(each param: mechanism + [ref])\n\n"
+                    "## 研究缺口\n(what is NOT covered by found literature)\n\n"
+                    "## 參考文獻\n(all cited with PMID + URL)"
+                )
 
-            user_prompt = f"""Process Context: {process_context}
+                with st.spinner("🧠 Gemini 正在基於真實文獻分析（約 30-60 秒）..."):
+                    try:
+                        ai_response = call_gemini_lit(_api_key_lit, prompt)
+                        st.session_state["lit_response"] = ai_response
+                        st.session_state["lit_ref_list"] = ref_list
+                        st.session_state["lit_params"] = {
+                            "target": target_var_lit,
+                            "features": important_features,
+                            "context": process_context,
+                        }
+                        st.success("✅ 分析完成！")
+                    except Exception as e:
+                        import traceback
+                        st.error("Gemini 呼叫失敗：" + str(e))
+                        if hasattr(e, "read"):
+                            try:
+                                st.code(e.read().decode("utf-8"), language="json")
+                            except Exception:
+                                pass
+                        st.code(traceback.format_exc())
 
-Target Variable (Y): {target_var_lit}
-
-Important Process Parameters identified from data analysis:
-{feat_list_str}
-
-Analysis Depth Required:
-{depth_instruction}
-
-Please analyze the scientific literature basis for why these parameters are important predictors of {target_var_lit}.
-Focus on mechanistic understanding that would help a bioprocess engineer interpret these data-driven findings."""
-
-            # ── 呼叫 Claude API ──────────────────────────────
-            with st.spinner("🔍 AI 正在分析文獻關係，請稍候（約 20-40 秒）..."):
-                try:
-                    import json as _json
-                    import urllib.request as _req
-                    import os as _os
-
-                    _api_key = st.secrets.get("GEMINI_API_KEY", _os.environ.get("GEMINI_API_KEY", ""))
-                    if not _api_key:
-                        st.error("❌ 找不到 GEMINI_API_KEY。請在 Streamlit Cloud → Settings → Secrets 中設定。")
-                        st.code('GEMINI_API_KEY = "AIza..."')
-                        st.stop()
-
-                    # Gemini REST API
-                    _gemini_url = (
-                        f"https://generativelanguage.googleapis.com/v1beta/models/"
-                        f"gemini-2.5-flash:generateContent?key={_api_key}"
-                    )
-                    # Merge system + user into single user turn (Gemini style)
-                    _combined = f"{system_prompt}\n\n---\n\n{user_prompt}"
-                    payload = _json.dumps({
-                        "contents": [{"role": "user", "parts": [{"text": _combined}]}],
-                        "generationConfig": {"maxOutputTokens": 4000, "temperature": 0.3},
-                    }).encode("utf-8")
-
-                    request = _req.Request(
-                        _gemini_url,
-                        data=payload,
-                        headers={"Content-Type": "application/json"},
-                        method="POST"
-                    )
-
-                    with _req.urlopen(request) as resp:
-                        result = _json.loads(resp.read().decode("utf-8"))
-
-                    ai_response = result["candidates"][0]["content"]["parts"][0]["text"]
-                    st.session_state["lit_response"] = ai_response
-                    st.session_state["lit_params"] = {
-                        "target": target_var_lit,
-                        "features": important_features,
-                        "mode": analysis_mode,
-                        "context": process_context,
-                    }
-                    st.success("✅ 分析完成！")
-
-                except Exception as e:
-                    import traceback
-                    st.error(f"API 呼叫失敗：{e}")
-                    if hasattr(e, "read"):
-                        try:
-                            body = e.read().decode("utf-8")
-                            st.code(body, language="json")
-                        except:
-                            pass
-                    st.code(traceback.format_exc())
-
-    # ── 顯示結果 ──────────────────────────────────────────────
+    # ── 顯示分析結果 ──────────────────────────────────────────
     if st.session_state.get("lit_response"):
-        params = st.session_state.get("lit_params", {})
-        st.markdown("---")
-        st.markdown(f"### 📄 分析結果")
-        st.caption(f"目標：`{params.get('target','')}` ｜ 模式：{params.get('mode','')} ｜ 參數數：{len(params.get('features',[]))}")
+        params   = st.session_state.get("lit_params", {})
+        ref_list = st.session_state.get("lit_ref_list", [])
 
+        st.markdown("---")
+        st.markdown("### 📄 分析結果")
+        st.caption(
+            "目標：`" + params.get("target", "") + "` ｜ "
+            "參數數：" + str(len(params.get("features", []))) + " ｜ "
+            "引用論文：" + str(len(ref_list)) + " 篇"
+        )
         st.markdown(st.session_state["lit_response"])
 
+        if ref_list:
+            st.markdown("### 🔗 快速論文連結")
+            for ref in ref_list:
+                url_m = _re2.search(r"https://pubmed[^\s]+", ref)
+                if url_m:
+                    label = ref.split(url_m.group())[0].rstrip(". ")
+                    st.markdown("- " + label + " [🔗 PubMed](" + url_m.group() + ")")
+
         st.markdown("---")
-        # 下載按鈕
-        export_text = f"""# 文獻佐證分析報告
-## 製程背景
-{params.get('context', '')}
-
-## 目標變數
-{params.get('target', '')}
-
-## 分析參數
-{chr(10).join(['- ' + f for f in params.get('features', [])])}
-
-## 分析模式
-{params.get('mode', '')}
-
----
-
-## AI 分析結果
-
-{st.session_state['lit_response']}
-"""
+        export_md = (
+            "# 文獻佐證分析報告\n"
+            "生成時間：" + _time2.strftime("%Y-%m-%d %H:%M") + "\n\n"
+            "## 製程背景\n" + params.get("context", "") + "\n\n"
+            "## 目標變數\n" + params.get("target", "") + "\n\n"
+            "## 分析參數\n" + "\n".join(["- " + f for f in params.get("features", [])]) + "\n\n"
+            "---\n\n"
+            "## AI 分析結果（基於 PubMed 真實文獻）\n\n"
+            + st.session_state["lit_response"] + "\n\n"
+            "---\n\n"
+            "## 所有搜尋到的論文\n\n"
+            + "\n".join(ref_list)
+        )
         st.download_button(
-            label="📥 下載分析報告（Markdown）",
-            data=export_text.encode("utf-8"),
-            file_name="literature_analysis_report.md",
+            "📥 下載完整報告（含文獻出處）",
+            data=export_md.encode("utf-8"),
+            file_name="pubmed_literature_report.md",
             mime="text/markdown",
             key="download_lit"
         )
 
-        # 追問功能
         st.markdown("### 💬 追問")
-        follow_up = st.text_area("針對以上分析，有什麼想進一步了解的？",
-                                  placeholder="例：Column loading capacity 對 yield 的非線性效應有哪些文獻？",
-                                  key="lit_followup_q")
+        follow_up = st.text_area(
+            "針對以上分析，想進一步了解？",
+            placeholder="例：Loading capacity 對 yield 的非線性效應，文獻中有哪些實驗數據？",
+            key="lit_followup_q"
+        )
         if st.button("📨 送出追問", key="lit_followup_btn"):
             if follow_up.strip():
+                _api_key_fu = st.secrets.get("GEMINI_API_KEY", _os2.environ.get("GEMINI_API_KEY", ""))
                 with st.spinner("思考中..."):
                     try:
-                        import json as _json
-                        import urllib.request as _req
-                        import os as _os
-                        _api_key = st.secrets.get("GEMINI_API_KEY", _os.environ.get("GEMINI_API_KEY", ""))
-
-                        _gemini_url2 = (
-                            f"https://generativelanguage.googleapis.com/v1beta/models/"
-                            f"gemini-2.5-flash:generateContent?key={_api_key}"
+                        lang_fu = "Respond in Traditional Chinese." if lang_lit == "繁體中文" else "Respond in English."
+                        fu_prompt = (
+                            "Based on this previous analysis:\n\n"
+                            + st.session_state["lit_response"]
+                            + "\n\nUser follow-up: " + follow_up
+                            + "\n\nAnswer using ONLY the cited literature. "
+                            "If more papers are needed, say so clearly.\n" + lang_fu
                         )
-                        # Build multi-turn conversation for Gemini
-                        _combined_init = f"{system_prompt}\n\n---\n\n{user_prompt}"
-                        followup_payload = _json.dumps({
-                            "contents": [
-                                {"role": "user",  "parts": [{"text": _combined_init}]},
-                                {"role": "model", "parts": [{"text": st.session_state["lit_response"]}]},
-                                {"role": "user",  "parts": [{"text": follow_up}]},
-                            ],
-                            "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.3},
-                        }).encode("utf-8")
-
-                        req2 = _req.Request(
-                            _gemini_url2,
-                            data=followup_payload,
-                            headers={"Content-Type": "application/json"},
-                            method="POST"
-                        )
-                        with _req.urlopen(req2) as resp2:
-                            result2 = _json.loads(resp2.read().decode("utf-8"))
+                        reply = call_gemini_lit(_api_key_fu, fu_prompt, max_tokens=2000)
                         st.markdown("#### 💬 回覆")
-                        st.markdown(result2["candidates"][0]["content"]["parts"][0]["text"])
+                        st.markdown(reply)
                     except Exception as e:
-                        st.error(f"追問失敗：{e}")
+                        st.error("追問失敗：" + str(e))
+
