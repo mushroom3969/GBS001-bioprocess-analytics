@@ -1332,33 +1332,35 @@ Focus on mechanistic understanding that would help a bioprocess engineer interpr
                     import urllib.request as _req
                     import os as _os
 
-                    _api_key = st.secrets.get("ANTHROPIC_API_KEY", _os.environ.get("ANTHROPIC_API_KEY", ""))
+                    _api_key = st.secrets.get("GEMINI_API_KEY", _os.environ.get("GEMINI_API_KEY", ""))
                     if not _api_key:
-                        st.error("❌ 找不到 ANTHROPIC_API_KEY。請在 Streamlit Cloud → Settings → Secrets 中設定。")
+                        st.error("❌ 找不到 GEMINI_API_KEY。請在 Streamlit Cloud → Settings → Secrets 中設定。")
+                        st.code('GEMINI_API_KEY = "AIza..."')
                         st.stop()
 
+                    # Gemini REST API
+                    _gemini_url = (
+                        f"https://generativelanguage.googleapis.com/v1beta/models/"
+                        f"gemini-1.5-flash:generateContent?key={_api_key}"
+                    )
+                    # Merge system + user into single user turn (Gemini style)
+                    _combined = f"{system_prompt}\n\n---\n\n{user_prompt}"
                     payload = _json.dumps({
-                        "model": "claude-sonnet-4-5",
-                        "max_tokens": 4000,
-                        "system": system_prompt,
-                        "messages": [{"role": "user", "content": user_prompt}]
+                        "contents": [{"role": "user", "parts": [{"text": _combined}]}],
+                        "generationConfig": {"maxOutputTokens": 4000, "temperature": 0.3},
                     }).encode("utf-8")
 
                     request = _req.Request(
-                        "https://api.anthropic.com/v1/messages",
+                        _gemini_url,
                         data=payload,
-                        headers={
-                            "Content-Type": "application/json",
-                            "x-api-key": _api_key,
-                            "anthropic-version": "2023-06-01",
-                        },
+                        headers={"Content-Type": "application/json"},
                         method="POST"
                     )
 
                     with _req.urlopen(request) as resp:
                         result = _json.loads(resp.read().decode("utf-8"))
 
-                    ai_response = result["content"][0]["text"]
+                    ai_response = result["candidates"][0]["content"]["parts"][0]["text"]
                     st.session_state["lit_response"] = ai_response
                     st.session_state["lit_params"] = {
                         "target": target_var_lit,
@@ -1371,7 +1373,6 @@ Focus on mechanistic understanding that would help a bioprocess engineer interpr
                 except Exception as e:
                     import traceback
                     st.error(f"API 呼叫失敗：{e}")
-                    # Show response body if it's an HTTP error
                     if hasattr(e, "read"):
                         try:
                             body = e.read().decode("utf-8")
@@ -1430,32 +1431,32 @@ Focus on mechanistic understanding that would help a bioprocess engineer interpr
                         import json as _json
                         import urllib.request as _req
                         import os as _os
-                        _api_key = st.secrets.get("ANTHROPIC_API_KEY", _os.environ.get("ANTHROPIC_API_KEY", ""))
+                        _api_key = st.secrets.get("GEMINI_API_KEY", _os.environ.get("GEMINI_API_KEY", ""))
 
+                        _gemini_url2 = (
+                            f"https://generativelanguage.googleapis.com/v1beta/models/"
+                            f"gemini-1.5-flash:generateContent?key={_api_key}"
+                        )
+                        # Build multi-turn conversation for Gemini
+                        _combined_init = f"{system_prompt}\n\n---\n\n{user_prompt}"
                         followup_payload = _json.dumps({
-                            "model": "claude-sonnet-4-5",
-                            "max_tokens": 2000,
-                            "system": system_prompt,
-                            "messages": [
-                                {"role": "user", "content": user_prompt},
-                                {"role": "assistant", "content": st.session_state["lit_response"]},
-                                {"role": "user", "content": follow_up}
-                            ]
+                            "contents": [
+                                {"role": "user",  "parts": [{"text": _combined_init}]},
+                                {"role": "model", "parts": [{"text": st.session_state["lit_response"]}]},
+                                {"role": "user",  "parts": [{"text": follow_up}]},
+                            ],
+                            "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.3},
                         }).encode("utf-8")
 
                         req2 = _req.Request(
-                            "https://api.anthropic.com/v1/messages",
+                            _gemini_url2,
                             data=followup_payload,
-                            headers={
-                                "Content-Type": "application/json",
-                                "x-api-key": _api_key,
-                                "anthropic-version": "2023-06-01",
-                            },
+                            headers={"Content-Type": "application/json"},
                             method="POST"
                         )
                         with _req.urlopen(req2) as resp2:
                             result2 = _json.loads(resp2.read().decode("utf-8"))
                         st.markdown("#### 💬 回覆")
-                        st.markdown(result2["content"][0]["text"])
+                        st.markdown(result2["candidates"][0]["content"]["parts"][0]["text"])
                     except Exception as e:
                         st.error(f"追問失敗：{e}")
