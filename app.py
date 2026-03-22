@@ -1369,9 +1369,16 @@ Focus on mechanistic understanding that would help a bioprocess engineer interpr
                     st.success("✅ 分析完成！")
 
                 except Exception as e:
+                    import traceback
                     st.error(f"API 呼叫失敗：{e}")
-                    st.info("提示：請確認 Streamlit Cloud Secrets 中已設定 `ANTHROPIC_API_KEY`，"
-                            "或在本機的環境變數中設定。")
+                    # Show response body if it's an HTTP error
+                    if hasattr(e, "read"):
+                        try:
+                            body = e.read().decode("utf-8")
+                            st.code(body, language="json")
+                        except:
+                            pass
+                    st.code(traceback.format_exc())
 
     # ── 顯示結果 ──────────────────────────────────────────────
     if st.session_state.get("lit_response"):
