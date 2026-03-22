@@ -1330,6 +1330,12 @@ Focus on mechanistic understanding that would help a bioprocess engineer interpr
                 try:
                     import json as _json
                     import urllib.request as _req
+                    import os as _os
+
+                    _api_key = st.secrets.get("ANTHROPIC_API_KEY", _os.environ.get("ANTHROPIC_API_KEY", ""))
+                    if not _api_key:
+                        st.error("❌ 找不到 ANTHROPIC_API_KEY。請在 Streamlit Cloud → Settings → Secrets 中設定。")
+                        st.stop()
 
                     payload = _json.dumps({
                         "model": "claude-sonnet-4-20250514",
