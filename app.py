@@ -432,6 +432,7 @@ tabs = st.tabs([
     "🔗 相關性分析",
     "🧩 PCA 分析",
     "🌲 特徵重要性",
+    "📚 文獻佐證分析",
 ])
 
 # ─────────────────────────────────────────────────────────
@@ -1177,3 +1178,271 @@ with tabs[6]:
                         st.caption("VIP ≥ 1.0 的特徵（紅色）通常被視為對目標變數有顯著影響。")
                         st.dataframe(vip_df_pls.style.background_gradient(cmap="Reds", subset=["VIP"]),
                                      width="stretch", hide_index=True)
+
+
+# ─────────────────────────────────────────────────────────
+# TAB 7: 文獻佐證分析
+# ─────────────────────────────────────────────────────────
+with tabs[7]:
+    st.header("📚 文獻佐證分析")
+    st.markdown("""
+    <div class="info-box">
+    根據你的分析結果（重要參數 + 目標變數），使用 AI 搜尋相關科學文獻，
+    解釋這些製程參數為何對目標產量/品質有影響，並提供可追蹤的文獻方向。
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── 參數輸入區 ──────────────────────────────────────────
+    st.markdown("### Step 1：設定分析參數")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        target_var_lit = st.text_input(
+            "🎯 目標變數（Y）",
+            value=st.session_state.get("target_col", ""),
+            placeholder="例：phenyl chromatography_Yield Rate (%)",
+            help="你想要解釋的輸出變數"
+        )
+        process_context = st.text_input(
+            "🧪 製程背景（Product / Process）",
+            value="rhG-CSF protein purification, Phenyl Hydrophobic Interaction Chromatography",
+            help="讓 AI 了解製程背景，產出更精準的文獻分析"
+        )
+
+    with col_b:
+        # 自動帶入重要性分析結果
+        auto_features = []
+        if st.session_state.get("fi_perm_df") is not None:
+            auto_features = st.session_state["fi_perm_df"]["Feature"].head(10).tolist()
+        if st.session_state.get("pls_vip_df") is not None:
+            vip_top = st.session_state["pls_vip_df"][
+                st.session_state["pls_vip_df"]["VIP"] >= 1.0
+            ]["Feature"].head(10).tolist()
+            auto_features = list(dict.fromkeys(auto_features + vip_top))
+
+        default_feat_text = "\n".join(auto_features[:8]) if auto_features else ""
+        important_features_text = st.text_area(
+            "📌 重要參數（每行一個，自動帶入分析結果）",
+            value=default_feat_text,
+            height=180,
+            help="從特徵重要性 / PLS-VIP 分析中選出的關鍵參數"
+        )
+
+    important_features = [f.strip() for f in important_features_text.strip().split("\n") if f.strip()]
+
+    # ── 分析模式選擇 ─────────────────────────────────────────
+    st.markdown("### Step 2：選擇分析深度")
+    analysis_mode = st.radio(
+        "分析模式",
+        [
+            "📋 快速摘要（每個參數 2-3 句文獻支持）",
+            "📖 深度分析（機制解釋 + 文獻方向 + 實驗建議）",
+            "🔬 逐一深挖（每個參數獨立詳細分析）",
+        ],
+        horizontal=False,
+        key="lit_mode"
+    )
+
+    lang = st.radio("輸出語言", ["繁體中文", "English"], horizontal=True, key="lit_lang")
+
+    # ── 執行分析 ─────────────────────────────────────────────
+    st.markdown("### Step 3：執行 AI 文獻分析")
+
+    if not important_features:
+        st.warning("請先填入重要參數，或先執行特徵重要性分析（Tab 7）讓系統自動帶入。")
+    elif not target_var_lit.strip():
+        st.warning("請填入目標變數。")
+    else:
+        st.markdown("**將分析以下參數與目標的文獻關係：**")
+        feat_cols = st.columns(min(4, len(important_features)))
+        for i, feat in enumerate(important_features):
+            feat_cols[i % len(feat_cols)].markdown(f"- `{feat}`")
+
+        if st.button("🔍 開始 AI 文獻分析", type="primary", key="run_lit"):
+
+            # ── 組裝 Prompt ──────────────────────────────────
+            feat_list_str = "\n".join([f"  {i+1}. {f}" for i, f in enumerate(important_features)])
+
+            if "快速摘要" in analysis_mode:
+                depth_instruction = """
+For each parameter, provide:
+- 1-2 sentences explaining the known mechanistic relationship with the target variable
+- Key reference direction (journal name or research area, not fabricated citations)
+- Confidence level: [Well-established / Likely / Hypothetical]
+Keep each parameter section concise (3-5 sentences total).
+"""
+            elif "深度分析" in analysis_mode:
+                depth_instruction = """
+Provide a comprehensive analysis covering:
+1. **Overall Narrative**: How do these parameters collectively influence the target?
+2. **For each parameter**:
+   - Mechanistic explanation (physicochemical or biological basis)
+   - Known literature direction (which journals/research areas cover this)
+   - Interaction effects with other listed parameters if known
+   - Confidence level: [Well-established / Likely / Hypothetical]
+3. **Research Gaps**: What is NOT well understood and worth investigating?
+4. **Experimental Suggestions**: Based on literature, what follow-up experiments would validate these findings?
+"""
+            else:  # 逐一深挖
+                depth_instruction = """
+For EACH parameter, write a standalone deep-dive section:
+- Full mechanistic explanation with physicochemical basis
+- How it specifically affects the target variable (direction + magnitude if known)
+- Key research areas and journals that have studied this
+- Whether the effect is linear, non-linear, or context-dependent
+- Interaction with other process parameters
+- Practical implications for process control
+- Confidence: [Well-established / Likely / Hypothetical]
+"""
+
+            lang_instruction = "Respond in Traditional Chinese (繁體中文)." if lang == "繁體中文" else "Respond in English."
+
+            system_prompt = f"""You are an expert bioprocess scientist specializing in protein purification, 
+chromatography, and downstream processing. You have deep knowledge of scientific literature in:
+- Biopharmaceutical manufacturing
+- Protein refolding and purification
+- Chromatography (HIC, IEX, affinity)
+- Statistical process control in biopharma
+
+IMPORTANT RULES:
+1. Only cite real, plausible research directions — do NOT fabricate specific paper titles, authors, or DOIs
+2. You MAY mention real journals (e.g., Journal of Chromatography A, Biotechnology & Bioengineering, etc.)
+3. You MAY mention well-known mechanistic principles that are established in the field
+4. Always indicate your confidence level for each claim
+5. Be honest when a relationship is hypothetical or context-dependent
+6. {lang_instruction}"""
+
+            user_prompt = f"""Process Context: {process_context}
+
+Target Variable (Y): {target_var_lit}
+
+Important Process Parameters identified from data analysis:
+{feat_list_str}
+
+Analysis Depth Required:
+{depth_instruction}
+
+Please analyze the scientific literature basis for why these parameters are important predictors of {target_var_lit}.
+Focus on mechanistic understanding that would help a bioprocess engineer interpret these data-driven findings."""
+
+            # ── 呼叫 Claude API ──────────────────────────────
+            with st.spinner("🔍 AI 正在分析文獻關係，請稍候（約 20-40 秒）..."):
+                try:
+                    import json as _json
+                    import urllib.request as _req
+
+                    payload = _json.dumps({
+                        "model": "claude-sonnet-4-20250514",
+                        "max_tokens": 4000,
+                        "system": system_prompt,
+                        "messages": [{"role": "user", "content": user_prompt}]
+                    }).encode("utf-8")
+
+                    request = _req.Request(
+                        "https://api.anthropic.com/v1/messages",
+                        data=payload,
+                        headers={
+                            "Content-Type": "application/json",
+                            "x-api-key": _api_key,
+                            "anthropic-version": "2023-06-01",
+                        },
+                        method="POST"
+                    )
+
+                    with _req.urlopen(request) as resp:
+                        result = _json.loads(resp.read().decode("utf-8"))
+
+                    ai_response = result["content"][0]["text"]
+                    st.session_state["lit_response"] = ai_response
+                    st.session_state["lit_params"] = {
+                        "target": target_var_lit,
+                        "features": important_features,
+                        "mode": analysis_mode,
+                        "context": process_context,
+                    }
+                    st.success("✅ 分析完成！")
+
+                except Exception as e:
+                    st.error(f"API 呼叫失敗：{e}")
+                    st.info("提示：請確認 Streamlit Cloud Secrets 中已設定 `ANTHROPIC_API_KEY`，"
+                            "或在本機的環境變數中設定。")
+
+    # ── 顯示結果 ──────────────────────────────────────────────
+    if st.session_state.get("lit_response"):
+        params = st.session_state.get("lit_params", {})
+        st.markdown("---")
+        st.markdown(f"### 📄 分析結果")
+        st.caption(f"目標：`{params.get('target','')}` ｜ 模式：{params.get('mode','')} ｜ 參數數：{len(params.get('features',[]))}")
+
+        st.markdown(st.session_state["lit_response"])
+
+        st.markdown("---")
+        # 下載按鈕
+        export_text = f"""# 文獻佐證分析報告
+## 製程背景
+{params.get('context', '')}
+
+## 目標變數
+{params.get('target', '')}
+
+## 分析參數
+{chr(10).join(['- ' + f for f in params.get('features', [])])}
+
+## 分析模式
+{params.get('mode', '')}
+
+---
+
+## AI 分析結果
+
+{st.session_state['lit_response']}
+"""
+        st.download_button(
+            label="📥 下載分析報告（Markdown）",
+            data=export_text.encode("utf-8"),
+            file_name="literature_analysis_report.md",
+            mime="text/markdown",
+            key="download_lit"
+        )
+
+        # 追問功能
+        st.markdown("### 💬 追問")
+        follow_up = st.text_area("針對以上分析，有什麼想進一步了解的？",
+                                  placeholder="例：Column loading capacity 對 yield 的非線性效應有哪些文獻？",
+                                  key="lit_followup_q")
+        if st.button("📨 送出追問", key="lit_followup_btn"):
+            if follow_up.strip():
+                with st.spinner("思考中..."):
+                    try:
+                        import json as _json
+                        import urllib.request as _req
+                        import os as _os
+                        _api_key = st.secrets.get("ANTHROPIC_API_KEY", _os.environ.get("ANTHROPIC_API_KEY", ""))
+
+                        followup_payload = _json.dumps({
+                            "model": "claude-sonnet-4-20250514",
+                            "max_tokens": 2000,
+                            "system": system_prompt,
+                            "messages": [
+                                {"role": "user", "content": user_prompt},
+                                {"role": "assistant", "content": st.session_state["lit_response"]},
+                                {"role": "user", "content": follow_up}
+                            ]
+                        }).encode("utf-8")
+
+                        req2 = _req.Request(
+                            "https://api.anthropic.com/v1/messages",
+                            data=followup_payload,
+                            headers={
+                                "Content-Type": "application/json",
+                                "x-api-key": _api_key,
+                                "anthropic-version": "2023-06-01",
+                            },
+                            method="POST"
+                        )
+                        with _req.urlopen(req2) as resp2:
+                            result2 = _json.loads(resp2.read().decode("utf-8"))
+                        st.markdown("#### 💬 回覆")
+                        st.markdown(result2["content"][0]["text"])
+                    except Exception as e:
+                        st.error(f"追問失敗：{e}")
