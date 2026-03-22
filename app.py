@@ -1338,7 +1338,7 @@ Focus on mechanistic understanding that would help a bioprocess engineer interpr
                         st.stop()
 
                     payload = _json.dumps({
-                        "model": "claude-sonnet-4-20250514",
+                        "model": "claude-sonnet-4-5",
                         "max_tokens": 4000,
                         "system": system_prompt,
                         "messages": [{"role": "user", "content": user_prompt}]
@@ -1426,7 +1426,7 @@ Focus on mechanistic understanding that would help a bioprocess engineer interpr
                         _api_key = st.secrets.get("ANTHROPIC_API_KEY", _os.environ.get("ANTHROPIC_API_KEY", ""))
 
                         followup_payload = _json.dumps({
-                            "model": "claude-sonnet-4-20250514",
+                            "model": "claude-sonnet-4-5",
                             "max_tokens": 2000,
                             "system": system_prompt,
                             "messages": [
