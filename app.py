@@ -9,8 +9,15 @@ import streamlit as st
 import sys
 import os
 
-# Make utils and tabs importable
-sys.path.insert(0, os.path.dirname(__file__))
+# Make utils and tabs importable on Streamlit Cloud
+# __file__ may not resolve correctly; use both options
+_dir = os.path.dirname(os.path.abspath(__file__))
+if _dir not in sys.path:
+    sys.path.insert(0, _dir)
+# Also try current working directory
+_cwd = os.getcwd()
+if _cwd not in sys.path:
+    sys.path.insert(0, _cwd)
 
 from utils import load_and_clean_raw, split_process_df
 
