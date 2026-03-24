@@ -16,14 +16,14 @@ import pandas as pd
 import streamlit as st
 
 from utils import split_process_df
-from tabs import tab0_overview as tab_overview
-from tabs import tab1_trends   as tab_trend
-from tabs import tab2_feature_eng as tab_feature_eng
-from tabs import tab3_missing  as tab_missing
-from tabs import tab4_correlation as tab_correlation
-from tabs import tab5_pca      as tab_pca
-from tabs import tab6_feature_importance as tab_feature_importance
-from tabs import tab7_literature as tab_literature
+from tabs import tab_overview
+from tabs import tab_trend
+from tabs import tab_feature_eng
+from tabs import tab_missing
+from tabs import tab_correlation
+from tabs import tab_pca
+from tabs import tab_feature_importance
+from tabs import tab_literature
 
 
 # ── Page config ───────────────────────────────────────────────────────────────
