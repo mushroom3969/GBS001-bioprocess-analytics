@@ -1,4 +1,11 @@
 """Tab 3 — 缺失值分析"""
+import sys, os as _os
+_dir = _os.path.dirname(_os.path.abspath(__file__))
+_root = _os.path.dirname(_dir)
+for _p in [_dir, _root, _os.getcwd()]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 import streamlit as st

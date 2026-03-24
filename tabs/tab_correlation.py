@@ -1,4 +1,11 @@
 """Tab 4 — 相關性分析"""
+import sys, os as _os
+_dir = _os.path.dirname(_os.path.abspath(__file__))
+_root = _os.path.dirname(_dir)
+for _p in [_dir, _root, _os.getcwd()]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 import matplotlib.pyplot as plt
 import streamlit as st
 from utils import analyze_correlation
