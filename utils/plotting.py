@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import seaborn as sns
 
-from .data_processing import extract_batch_logic, extract_number
+from utils.data_processing import extract_batch_logic, extract_number
 
 
 def plot_indexed_lineplots(df, batch_col="BatchID", cols_per_row=3):

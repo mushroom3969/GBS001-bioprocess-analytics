@@ -6,7 +6,7 @@ for _p in [_dir, _root, _os.getcwd()]:
         sys.path.insert(0, _p)
 
 # ── data_processing ──────────────────────────────────────────────────────────
-from .data_processing import (
+from utils.data_processing import (
     # Batch ID helpers
     extract_batch_logic,
     extract_number,
@@ -25,7 +25,7 @@ from .data_processing import (
 )
 
 # ── plotting ─────────────────────────────────────────────────────────────────
-from .plotting import (
+from utils.plotting import (
     plot_indexed_lineplots,
     plot_clean_lineplots,
     plot_correlation_bar,
@@ -34,7 +34,7 @@ from .plotting import (
 )
 
 # ── ml_analysis ──────────────────────────────────────────────────────────────
-from .ml_analysis import (
+from utils.ml_analysis import (
     # Correlation
     compute_correlation,
     # PCA / Hotelling T²
