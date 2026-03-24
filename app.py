@@ -6,18 +6,24 @@ Bioprocess Data Analysis Tool
 import warnings
 warnings.filterwarnings("ignore")
 
+import sys, os as _os
+_dir = _os.path.dirname(_os.path.abspath(__file__))
+for _p in [_dir, _os.getcwd()]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 import pandas as pd
 import streamlit as st
 
 from utils import split_process_df
-import tabs.tab_overview          as tab_overview
-import tabs.tab_trend             as tab_trend
-import tabs.tab_feature_eng       as tab_feature_eng
-import tabs.tab_missing           as tab_missing
-import tabs.tab_correlation       as tab_correlation
-import tabs.tab_pca               as tab_pca
-import tabs.tab_feature_importance as tab_feature_importance
-import tabs.tab_literature        as tab_literature
+from tabs import tab0_overview as tab_overview
+from tabs import tab1_trends   as tab_trend
+from tabs import tab2_feature_eng as tab_feature_eng
+from tabs import tab3_missing  as tab_missing
+from tabs import tab4_correlation as tab_correlation
+from tabs import tab5_pca      as tab_pca
+from tabs import tab6_feature_importance as tab_feature_importance
+from tabs import tab7_literature as tab_literature
 
 
 # ── Page config ───────────────────────────────────────────────────────────────

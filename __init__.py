@@ -6,7 +6,7 @@ from .data_processing import (
 )
 from .plotting import (
     plot_indexed_lineplots, plot_clean_lineplots,
-    plot_correlation_bar, plot_missing_heatmap,
+    plot_correlation_bar, plot_missing_heatmap, plot_yield_tracking,
 )
 from .ml_analysis import (
     compute_correlation, compute_ht2_thresholds, compute_ht2_per_sample,

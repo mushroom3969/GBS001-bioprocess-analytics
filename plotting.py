@@ -118,3 +118,54 @@ def plot_missing_heatmap(df, col_names):
     ax.set_title("Missing Value Pattern")
     plt.tight_layout()
     return fig
+
+
+def plot_yield_tracking(df, tracked_col, batch_col="BatchID",
+                        title_prefix="", color="#2e86ab"):
+    """
+    Plot a single column (usually Yield-related) over batch sequence.
+    Used to show the before/after effect of feature engineering steps.
+
+    Parameters
+    ----------
+    df           : DataFrame containing batch_col and tracked_col
+    tracked_col  : column name to plot on Y-axis
+    batch_col    : column used for X-axis ordering
+    title_prefix : string prepended to the chart title
+    color        : line / marker color
+    """
+    if tracked_col not in df.columns:
+        return None
+
+    plot_df = df[[batch_col, tracked_col]].copy() if batch_col in df.columns \
+              else df[[tracked_col]].copy()
+
+    if batch_col in plot_df.columns:
+        plot_df["_sort"] = plot_df[batch_col].apply(extract_number)
+        plot_df = plot_df.sort_values("_sort").reset_index(drop=True)
+        plot_df = plot_df.drop(columns=["_sort"])
+    plot_df["_seq"] = range(1, len(plot_df) + 1)
+
+    fig, ax = plt.subplots(figsize=(12, 4))
+    ax.plot(plot_df["_seq"], plot_df[tracked_col],
+            marker="o", color=color, linewidth=1.8, ms=5)
+
+    # Shade missing values
+    for i, val in enumerate(plot_df[tracked_col]):
+        if pd.isna(val):
+            ax.axvspan(i + 0.5, i + 1.5, alpha=0.15, color="#e84855")
+
+    if batch_col in plot_df.columns:
+        ax.set_xticks(plot_df["_seq"])
+        ax.set_xticklabels(
+            [str(b)[-6:] for b in plot_df[batch_col]],
+            rotation=90, fontsize=7
+        )
+
+    title = f"{title_prefix}  {tracked_col}" if title_prefix else tracked_col
+    ax.set_title("\n".join(textwrap.wrap(title, width=80)), fontsize=10)
+    ax.set_xlabel("Batch Sequence")
+    ax.set_ylabel("Value")
+    ax.grid(linestyle="--", alpha=0.4)
+    plt.tight_layout()
+    return fig
